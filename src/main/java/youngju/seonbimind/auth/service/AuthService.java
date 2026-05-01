@@ -15,6 +15,8 @@ import youngju.seonbimind.auth.dto.SignupRequest;
 import youngju.seonbimind.auth.entity.AuthMember;
 import youngju.seonbimind.auth.jwt.JwtTokenProvider;
 import youngju.seonbimind.auth.repository.AuthMemberRepository;
+import youngju.seonbimind.classic.progress.dto.ProgressResponse;
+import youngju.seonbimind.classic.progress.service.ProgressService;
 
 @Service
 @RequiredArgsConstructor
@@ -24,16 +26,17 @@ public class AuthService {
     private final AuthMemberRepository authMemberRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final ProgressService progressService;
 
     @Transactional
     public AuthResult signup(SignupRequest request) {
         String loginId = request.resolvedLoginId();
-        requireNotBlank(request.name(), "이름");
-        requireNotBlank(loginId, "로그인 ID");
-        requireNotBlank(request.password(), "비밀번호");
+        requireNotBlank(request.name(), "name");
+        requireNotBlank(loginId, "loginId");
+        requireNotBlank(request.password(), "password");
 
         if (authMemberRepository.existsByLoginId(loginId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 사용 중인 로그인 ID입니다.");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "loginId is already in use.");
         }
 
         AuthMember member = AuthMember.create(
@@ -47,14 +50,14 @@ public class AuthService {
 
     public AuthResult login(LoginRequest request) {
         String loginId = request.resolvedLoginId();
-        requireNotBlank(loginId, "로그인 ID");
-        requireNotBlank(request.password(), "비밀번호");
+        requireNotBlank(loginId, "loginId");
+        requireNotBlank(request.password(), "password");
 
         AuthMember member = authMemberRepository.findByLoginId(loginId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인 ID 또는 비밀번호가 올바르지 않습니다."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "loginId or password is invalid."));
 
         if (!passwordEncoder.matches(request.password(), member.getPassword())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인 ID 또는 비밀번호가 올바르지 않습니다.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "loginId or password is invalid.");
         }
 
         return createAuthResult(member);
@@ -63,9 +66,9 @@ public class AuthService {
     public AuthResponse getMe(String accessToken) {
         String loginId = getCurrentLoginId();
         AuthMember member = authMemberRepository.findByLoginId(loginId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증 정보를 찾을 수 없습니다."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated member was not found."));
 
-        return new AuthResponse(member.getName(), accessToken, member.getLoginId());
+        return createAuthResponse(member, accessToken);
     }
 
     public long getRefreshTokenExpirationMs() {
@@ -75,22 +78,39 @@ public class AuthService {
     private AuthResult createAuthResult(AuthMember member) {
         String accessToken = jwtTokenProvider.createAccessToken(member);
         String refreshToken = jwtTokenProvider.createRefreshToken(member);
-        AuthResponse response = new AuthResponse(member.getName(), accessToken, member.getLoginId());
+        AuthResponse response = createAuthResponse(member, accessToken);
 
         return new AuthResult(response, refreshToken);
+    }
+
+    private AuthResponse createAuthResponse(AuthMember member, String accessToken) {
+        ProgressResponse progress = progressService.getProgress(member);
+        var todaySentence = progressService.getTodaySentence(member);
+
+        return new AuthResponse(
+                member.getName(),
+                accessToken,
+                member.getLoginId(),
+                progress.totalSolvedCount(),
+                progress.currentStreak(),
+                progress.currentRank(),
+                progress.nextRank(),
+                progress.remainingToNextRank(),
+                todaySentence
+        );
     }
 
     private String getCurrentLoginId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated() || "anonymousUser".equals(authentication.getName())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증이 필요합니다.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication is required.");
         }
         return authentication.getName();
     }
 
     private void requireNotBlank(String value, String fieldName) {
         if (value == null || value.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + "을(를) 입력해주세요.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + " is required.");
         }
     }
 }
