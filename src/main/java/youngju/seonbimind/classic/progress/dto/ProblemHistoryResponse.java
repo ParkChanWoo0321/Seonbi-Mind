@@ -16,7 +16,7 @@ public record ProblemHistoryResponse(
 
     public static ProblemHistoryResponse from(SolvedProblemHistory history) {
         return new ProblemHistoryResponse(
-                history.getId(),
+                history.getHistoryId() == null ? history.getId() : history.getHistoryId(),
                 history.getOriginalText(),
                 history.getReadingText(),
                 history.getMeaning(),

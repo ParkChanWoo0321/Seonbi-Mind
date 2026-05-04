@@ -2,7 +2,10 @@ package youngju.seonbimind.classic.progress.service;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +39,14 @@ public class ProgressService {
         UserProgress progress = userProgressRepository.findByMember(member)
                 .orElseGet(() -> userProgressRepository.save(UserProgress.create(member)));
 
+        ensureHistoryIds(member);
+        if (session.getHistoryId() == null) {
+            session.assignHistoryId(getMaxCompletedHistoryId(member) + 1);
+        }
+        if (solvedProblemHistoryRepository.existsByMemberAndHistoryId(member, session.getHistoryId())) {
+            return;
+        }
+
         progress.recordSolve(today);
         solvedProblemHistoryRepository.save(SolvedProblemHistory.from(session, session.getGptReason()));
     }
@@ -63,13 +74,53 @@ public class ProgressService {
                 .orElse(null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<ProblemHistoryResponse> getMyProblemHistory() {
         AuthMember member = currentMemberService.getCurrentMember();
+        ensureHistoryIds(member);
         return solvedProblemHistoryRepository.findByMemberOrderBySolvedAtDesc(member)
                 .stream()
                 .map(ProblemHistoryResponse::from)
                 .toList();
+    }
+
+    @Transactional
+    public void ensureHistoryIds(AuthMember member) {
+        List<SolvedProblemHistory> histories = solvedProblemHistoryRepository.findByMemberOrderBySolvedAtAsc(member);
+        Set<Long> usedHistoryIds = new HashSet<>();
+
+        for (SolvedProblemHistory history : histories) {
+            Long historyId = history.getHistoryId();
+            if (historyId != null && historyId > 0) {
+                usedHistoryIds.add(historyId);
+            }
+        }
+
+        long nextHistoryId = 1;
+        for (SolvedProblemHistory history : histories) {
+            Long historyId = history.getHistoryId();
+            if (historyId != null && historyId > 0) {
+                continue;
+            }
+
+            while (usedHistoryIds.contains(nextHistoryId)) {
+                nextHistoryId++;
+            }
+
+            history.assignHistoryId(nextHistoryId);
+            usedHistoryIds.add(nextHistoryId);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public long getMaxCompletedHistoryId(AuthMember member) {
+        Long maxHistoryId = solvedProblemHistoryRepository.findMaxHistoryIdByMember(member);
+        return maxHistoryId == null ? 0 : maxHistoryId;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<SolvedProblemHistory> findCompletedHistory(AuthMember member, Long historyId) {
+        return solvedProblemHistoryRepository.findByMemberAndHistoryId(member, historyId);
     }
 
     private ProgressResponse toResponse(int totalSolvedCount, int currentStreak) {

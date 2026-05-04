@@ -14,6 +14,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import lombok.AccessLevel;
@@ -25,7 +26,10 @@ import youngju.seonbimind.classic.sentence.entity.ClassicSentence;
 @Getter
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "problem_sessions")
+@Table(
+        name = "problem_sessions",
+        uniqueConstraints = @UniqueConstraint(name = "uk_problem_session_member_history", columnNames = {"member_id", "history_id"})
+)
 public class ProblemSession {
 
     private static final ZoneId SEOUL_ZONE = ZoneId.of("Asia/Seoul");
@@ -41,6 +45,9 @@ public class ProblemSession {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sentence_id", nullable = false)
     private ClassicSentence sentence;
+
+    @Column(name = "history_id")
+    private Long historyId;
 
     @Column(nullable = false)
     private boolean todaySentence;
@@ -81,9 +88,10 @@ public class ProblemSession {
 
     private LocalDateTime completedAt;
 
-    private ProblemSession(AuthMember member, ClassicSentence sentence, boolean todaySentence, String shuffledWords) {
+    private ProblemSession(AuthMember member, ClassicSentence sentence, Long historyId, boolean todaySentence, String shuffledWords) {
         this.member = member;
         this.sentence = sentence;
+        this.historyId = historyId;
         this.todaySentence = todaySentence;
         this.shuffledWords = shuffledWords;
         this.stage = ProblemSessionStage.ORDER;
@@ -91,8 +99,18 @@ public class ProblemSession {
         this.completed = false;
     }
 
-    public static ProblemSession start(AuthMember member, ClassicSentence sentence, boolean todaySentence, String shuffledWords) {
-        return new ProblemSession(member, sentence, todaySentence, shuffledWords);
+    public static ProblemSession start(
+            AuthMember member,
+            ClassicSentence sentence,
+            Long historyId,
+            boolean todaySentence,
+            String shuffledWords
+    ) {
+        return new ProblemSession(member, sentence, historyId, todaySentence, shuffledWords);
+    }
+
+    public void assignHistoryId(Long historyId) {
+        this.historyId = historyId;
     }
 
     public void submitOrderAnswer(String answer, boolean correct) {

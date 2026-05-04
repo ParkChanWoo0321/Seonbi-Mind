@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import youngju.seonbimind.classic.problem.dto.AnswerRequest;
 import youngju.seonbimind.classic.problem.dto.ProblemAnswerResponse;
+import youngju.seonbimind.classic.problem.dto.ProblemStartRequest;
 import youngju.seonbimind.classic.problem.dto.ProblemStartResponse;
 import youngju.seonbimind.classic.problem.service.ProblemService;
 
@@ -20,8 +21,8 @@ public class ProblemController {
     private final ProblemService problemService;
 
     @PostMapping("/start")
-    public ResponseEntity<ProblemStartResponse> startProblem() {
-        return ResponseEntity.ok(problemService.startProblem());
+    public ResponseEntity<ProblemStartResponse> startProblem(@RequestBody ProblemStartRequest request) {
+        return ResponseEntity.ok(problemService.startProblem(request));
     }
 
     @PostMapping("/order-answer/{problemId}")

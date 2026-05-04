@@ -11,6 +11,7 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import lombok.AccessLevel;
@@ -23,7 +24,10 @@ import youngju.seonbimind.classic.sentence.entity.ClassicSentence;
 @Getter
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "solved_problem_histories")
+@Table(
+        name = "solved_problem_histories",
+        uniqueConstraints = @UniqueConstraint(name = "uk_solved_history_member_history", columnNames = {"member_id", "history_id"})
+)
 public class SolvedProblemHistory {
 
     private static final ZoneId SEOUL_ZONE = ZoneId.of("Asia/Seoul");
@@ -39,6 +43,14 @@ public class SolvedProblemHistory {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sentence_id", nullable = false)
     private ClassicSentence sentence;
+
+    @Column(name = "history_id")
+    private Long historyId;
+
+    private Long problemSessionId;
+
+    @Column(nullable = false)
+    private boolean todaySentence;
 
     @Lob
     @Column(nullable = false)
@@ -82,6 +94,9 @@ public class SolvedProblemHistory {
     private SolvedProblemHistory(
             AuthMember member,
             ClassicSentence sentence,
+            Long historyId,
+            Long problemSessionId,
+            boolean todaySentence,
             String originalText,
             String readingText,
             String meaning,
@@ -96,6 +111,9 @@ public class SolvedProblemHistory {
     ) {
         this.member = member;
         this.sentence = sentence;
+        this.historyId = historyId;
+        this.problemSessionId = problemSessionId;
+        this.todaySentence = todaySentence;
         this.originalText = originalText;
         this.readingText = readingText;
         this.meaning = meaning;
@@ -114,6 +132,9 @@ public class SolvedProblemHistory {
         return new SolvedProblemHistory(
                 session.getMember(),
                 sentence,
+                session.getHistoryId(),
+                session.getId(),
+                session.isTodaySentence(),
                 sentence.getOriginalText(),
                 sentence.getReadingText(),
                 sentence.getMeaning(),
@@ -126,6 +147,10 @@ public class SolvedProblemHistory {
                 session.isCorrect(),
                 explanation
         );
+    }
+
+    public void assignHistoryId(Long historyId) {
+        this.historyId = historyId;
     }
 
     @PrePersist

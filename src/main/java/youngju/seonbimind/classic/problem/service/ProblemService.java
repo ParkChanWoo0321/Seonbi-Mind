@@ -16,12 +16,14 @@ import youngju.seonbimind.auth.service.CurrentMemberService;
 import youngju.seonbimind.classic.gpt.dto.MeaningEvaluationResult;
 import youngju.seonbimind.classic.gpt.service.GptMeaningEvaluationService;
 import youngju.seonbimind.classic.problem.dto.ProblemAnswerResponse;
+import youngju.seonbimind.classic.problem.dto.ProblemStartRequest;
 import youngju.seonbimind.classic.problem.dto.ProblemStartResponse;
 import youngju.seonbimind.classic.problem.entity.ProblemSession;
 import youngju.seonbimind.classic.problem.entity.ProblemSessionStage;
 import youngju.seonbimind.classic.problem.entity.UserSentenceUsage;
 import youngju.seonbimind.classic.problem.repository.ProblemSessionRepository;
 import youngju.seonbimind.classic.problem.repository.UserSentenceUsageRepository;
+import youngju.seonbimind.classic.progress.entity.SolvedProblemHistory;
 import youngju.seonbimind.classic.progress.service.ProgressService;
 import youngju.seonbimind.classic.sentence.entity.ClassicSentence;
 import youngju.seonbimind.classic.sentence.repository.ClassicSentenceRepository;
@@ -42,8 +44,39 @@ public class ProblemService {
     private final ProgressService progressService;
 
     @Transactional
-    public ProblemStartResponse startProblem() {
+    public ProblemStartResponse startProblem(ProblemStartRequest request) {
         AuthMember member = currentMemberService.getCurrentMember();
+        Long requestedHistoryId = resolveHistoryId(request);
+
+        progressService.ensureHistoryIds(member);
+        long maxCompletedHistoryId = progressService.getMaxCompletedHistoryId(member);
+        if (requestedHistoryId <= maxCompletedHistoryId) {
+            SolvedProblemHistory history = progressService.findCompletedHistory(member, requestedHistoryId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Problem history was not found."));
+            return toReviewResponse(history);
+        }
+
+        long nextHistoryId = maxCompletedHistoryId + 1;
+        if (requestedHistoryId > nextHistoryId) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "아직 접근할 수 없는 문제 번호입니다.");
+        }
+
+        return problemSessionRepository.findByMemberAndHistoryId(member, requestedHistoryId)
+                .map(this::toInProgressResponse)
+                .orElseGet(() -> startNextProblem(member, requestedHistoryId));
+    }
+
+    private ProblemStartResponse startNextProblem(AuthMember member, Long historyId) {
+        return problemSessionRepository
+                .findFirstByMemberAndCompletedFalseAndHistoryIdIsNullOrderByCreatedAtAsc(member)
+                .map(session -> {
+                    session.assignHistoryId(historyId);
+                    return toInProgressResponse(session);
+                })
+                .orElseGet(() -> createNewProblemSession(member, historyId));
+    }
+
+    private ProblemStartResponse createNewProblemSession(AuthMember member, Long historyId) {
         LocalDate today = LocalDate.now(SEOUL_ZONE);
         LocalDateTime startOfToday = today.atStartOfDay();
         LocalDateTime startOfTomorrow = today.plusDays(1).atStartOfDay();
@@ -71,11 +104,12 @@ public class ProblemService {
         ProblemSession session = problemSessionRepository.save(ProblemSession.start(
                 member,
                 sentence,
+                historyId,
                 !hasTodaySentence,
                 encodeWords(shuffledWords)
         ));
 
-        return toStartResponse(session, shuffledWords);
+        return toStartResponse(session, shuffledWords, false, true);
     }
 
     @Transactional
@@ -195,12 +229,46 @@ public class ProblemService {
         progressService.recordCompletedProblem(member, session);
     }
 
-    private ProblemStartResponse toStartResponse(ProblemSession session, List<String> shuffledWords) {
+    private ProblemStartResponse toInProgressResponse(ProblemSession session) {
+        return toStartResponse(
+                session,
+                decodeWords(session.getShuffledWords()),
+                session.isCompleted(),
+                !session.isCompleted()
+        );
+    }
+
+    private ProblemStartResponse toReviewResponse(SolvedProblemHistory history) {
+        return new ProblemStartResponse(
+                history.getHistoryId(),
+                history.getProblemSessionId() == null ? history.getId() : history.getProblemSessionId(),
+                history.getSentence().getId(),
+                history.isTodaySentence(),
+                true,
+                true,
+                false,
+                history.getOriginalText(),
+                history.getReadingText(),
+                history.getMeaning(),
+                decodeWords(history.getShuffledWords())
+        );
+    }
+
+    private ProblemStartResponse toStartResponse(
+            ProblemSession session,
+            List<String> shuffledWords,
+            boolean reviewMode,
+            boolean inProgress
+    ) {
         ClassicSentence sentence = session.getSentence();
         return new ProblemStartResponse(
+                session.getHistoryId(),
                 session.getId(),
                 sentence.getId(),
                 session.isTodaySentence(),
+                session.isCompleted(),
+                reviewMode,
+                inProgress,
                 sentence.getOriginalText(),
                 sentence.getReadingText(),
                 sentence.getMeaning(),
@@ -210,6 +278,24 @@ public class ProblemService {
 
     private String encodeWords(List<String> words) {
         return String.join(WORD_SEPARATOR, words);
+    }
+
+    private List<String> decodeWords(String encodedWords) {
+        if (encodedWords == null || encodedWords.isBlank()) {
+            return List.of();
+        }
+
+        return List.of(encodedWords.split(WORD_SEPARATOR));
+    }
+
+    private Long resolveHistoryId(ProblemStartRequest request) {
+        if (request == null || request.historyId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "historyId is required.");
+        }
+        if (request.historyId() < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "historyId must be greater than 0.");
+        }
+        return request.historyId();
     }
 
     private boolean isSameSentence(String expected, String actual) {

@@ -10,6 +10,10 @@ public interface ProblemSessionRepository extends JpaRepository<ProblemSession, 
 
     Optional<ProblemSession> findByIdAndMember(Long id, AuthMember member);
 
+    Optional<ProblemSession> findByMemberAndHistoryId(AuthMember member, Long historyId);
+
+    Optional<ProblemSession> findFirstByMemberAndCompletedFalseAndHistoryIdIsNullOrderByCreatedAtAsc(AuthMember member);
+
     boolean existsByMemberAndTodaySentenceTrueAndCreatedAtBetween(
             AuthMember member,
             LocalDateTime start,
